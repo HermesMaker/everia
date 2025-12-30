@@ -1,17 +1,9 @@
-<!--toc:start-->
-- [Plan](#plan)
-- [Usage](#usage)
-<!--toc:end-->
-
-## Plan
-
-url input
-
-- url by tag
-- url by post
+# everia downloader tool
 
 ## Usage
 
 ```bash
 everia <url>
 ```
+
+- url is accept only with `tag`.
