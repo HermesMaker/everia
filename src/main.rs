@@ -12,7 +12,7 @@ struct Args {
     completion: Option<Shell>,
     /// specific output directory
     #[arg(short, long)]
-    output: Option<String>
+    output: Option<String>,
 }
 
 #[tokio::main]
