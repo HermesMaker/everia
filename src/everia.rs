@@ -1,5 +1,8 @@
 use anyhow::Context;
-use std::sync::{Arc, Mutex};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use scraper::{Html, Selector};
 use tokio::fs;
@@ -18,12 +21,18 @@ pub struct Everia {
 impl Everia {
     pub fn parse_name(url: &str) -> String {
         let mut url: Vec<&str> = url.split("/").collect();
-        url.pop();
-        urlencoding::decode(url.pop().unwrap()).unwrap().to_string()
+        let file_name = if let Some(fname) = url.pop()
+            && !fname.is_empty()
+        {
+            fname
+        } else {
+            url.pop().unwrap()
+        };
+        urlencoding::decode(file_name).unwrap().to_string()
     }
-    pub fn new(url: &str, out_folder: Option<&str>) -> anyhow::Result<Self> {
+    pub fn new(url: &str, out_folder: Option<String>) -> anyhow::Result<Self> {
         let out_folder = match out_folder {
-            Some(_as) => _as.to_string(),
+            Some(_as) => _as,
             None => Everia::parse_name(url),
         };
         println!("out_folder {}", out_folder);
@@ -67,7 +76,7 @@ impl Everia {
         let response = client.get(post_url).send().await?;
         let text = response.text().await?;
         let document = Html::parse_document(&text);
-        let selector = Selector::parse("div.entry-content").unwrap();
+        let selector = Selector::parse("div.entry-content, div.mainleft").unwrap();
         let selected = document.select(&selector);
 
         let mut image_links = Vec::new();
@@ -76,6 +85,8 @@ impl Everia {
             let selected = document.select(&selector);
             for sel in selected {
                 if let Some(link) = sel.attr("data-lazy-src") {
+                    image_links.push(link.to_string());
+                } else if let Some(link) = sel.attr("data-original") {
                     image_links.push(link.to_string());
                 }
             }
@@ -86,19 +97,33 @@ impl Everia {
 
     /// this function use to create sub folder for each post.
     /// and return folder path likes `./abc/folder/`
-    pub async fn create_folder_from_url(&self, post_url: &str) -> String {
+    pub async fn create_folder_from_url(&self, post_url: &str) -> Option<String> {
         let mut folder_name: Vec<&str> = post_url.split("/").collect();
-        folder_name.pop();
-        let folder_name = folder_name.pop().unwrap_or("None");
+        let folder_name = if let Some(name) = folder_name.pop()
+            && !name.is_empty()
+        {
+            name
+        } else {
+            folder_name.pop().unwrap_or("None")
+        };
         let folder_name = urlencoding::decode(folder_name).unwrap().to_string();
         let path = format!("{}/{}/", self.out_folder, folder_name);
-        let _ = fs::create_dir_all(&path).await;
-        path
+        if Path::new(&path).exists() {
+            None
+        } else {
+            let _ = fs::create_dir_all(&path).await;
+            Some(path)
+        }
     }
 
     /// Download all images from post
     pub async fn download_posts(&self, post_url: &str) -> anyhow::Result<()> {
-        let out_folder = self.create_folder_from_url(post_url).await;
+        let out_folder = if let Some(out) = self.create_folder_from_url(post_url).await {
+            out
+        } else {
+            println!("skip {}", post_url);
+            return Ok(());
+        };
         let image_links = self.collect_image_link_from_post(post_url).await?;
         let mut tasks = Vec::new();
 
@@ -166,7 +191,11 @@ impl Everia {
     }
 
     pub async fn download(&self) {
-        let posts = self.collect_posts().await;
+        let posts = if self.url.as_str().contains("tag") {
+            self.collect_posts().await
+        } else {
+            vec![self.url.clone().to_string()]
+        };
         let posts = Arc::new(Mutex::new(posts));
         let mut threads = Vec::new();
 
